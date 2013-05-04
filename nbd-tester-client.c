@@ -21,6 +21,10 @@
  * this program; if not, write to the Free Software Foundation, Inc., 51
  * Franklin St, Fifth Floor, Boston, MA  02110-1301 USA
  */
+
+#include <stdint.h>
+#include <nbd-client.h>
+
 #include <stdlib.h>
 #include <stdio.h>
 #include <stdbool.h>
@@ -340,8 +344,8 @@ int setup_connection(gchar *hostname, int port, gchar* name, CONNECTION_TYPE cty
 	struct hostent *host;
 	struct sockaddr_in addr;
 	char buf[256];
-	uint64_t mymagic = (name ? opts_magic : cliserv_magic);
-	u64 tmp64;
+	uint64_t mymagic = (name ? NBD_MAGIC_OPTS : NBD_MAGIC_CLISERV);
+	uint64_t tmp64;
 	uint32_t tmp32 = 0;
 
 	sock=0;
@@ -365,18 +369,18 @@ int setup_connection(gchar *hostname, int port, gchar* name, CONNECTION_TYPE cty
 	}
 	if(ctype<CONNECTION_TYPE_INIT_PASSWD)
 		goto end;
-	READ_ALL_ERRCHK(sock, buf, strlen(INIT_PASSWD), err_open, "Could not read INIT_PASSWD: %s", strerror(errno));
+	READ_ALL_ERRCHK(sock, buf, strlen(NBD_INIT_PASSWD), err_open, "Could not read INIT_PASSWD: %s", strerror(errno));
 	if(strlen(buf)==0) {
 		snprintf(errstr, errstr_len, "Server closed connection");
 		goto err_open;
 	}
-	if(strncmp(buf, INIT_PASSWD, strlen(INIT_PASSWD))) {
+	if(strncmp(buf, NBD_INIT_PASSWD, strlen(NBD_INIT_PASSWD))) {
 		snprintf(errstr, errstr_len, "INIT_PASSWD does not match");
 		goto err_open;
 	}
 	if(ctype<CONNECTION_TYPE_CLISERV)
 		goto end;
-	READ_ALL_ERRCHK(sock, &tmp64, sizeof(tmp64), err_open, "Could not read cliserv_magic: %s", strerror(errno));
+	READ_ALL_ERRCHK(sock, &tmp64, sizeof(tmp64), err_open, "Could not read NBD_MAGIC_CLISERV: %s", strerror(errno));
 	tmp64=ntohll(tmp64);
 	if(tmp64 != mymagic) {
 		strncpy(errstr, "mymagic does not match", errstr_len);
@@ -395,7 +399,7 @@ int setup_connection(gchar *hostname, int port, gchar* name, CONNECTION_TYPE cty
 	/* reserved field */
 	WRITE_ALL_ERRCHK(sock, &tmp32, sizeof(tmp32), err_open, "Could not write reserved field: %s", strerror(errno));
 	/* magic */
-	tmp64 = htonll(opts_magic);
+	tmp64 = htonll(NBD_MAGIC_OPTS);
 	WRITE_ALL_ERRCHK(sock, &tmp64, sizeof(tmp64), err_open, "Could not write magic: %s", strerror(errno));
 	/* name */
 	tmp32 = htonl(NBD_OPT_EXPORT_NAME);
@@ -421,11 +425,11 @@ end:
 
 int close_connection(int sock, CLOSE_TYPE type) {
 	struct nbd_request req;
-	u64 counter=0;
+	uint64_t counter=0;
 
 	switch(type) {
 		case CONNECTION_CLOSE_PROPERLY:
-			req.magic=htonl(NBD_REQUEST_MAGIC);
+			req.magic=htonl(NBD_MAGIC_REQUEST);
 			req.type=htonl(NBD_CMD_DISC);
 			memcpy(&(req.handle), &(counter), sizeof(counter));
 			counter++;
@@ -456,13 +460,13 @@ int read_packet_check_header(int sock, size_t datasize, long long int curhandle)
 	READ_ALL_ERR_RT(sock, &rep, sizeof(rep), end, -1, "Could not read reply header: %s", strerror(errno));
 	rep.magic=ntohl(rep.magic);
 	rep.error=ntohl(rep.error);
-	if(rep.magic!=NBD_REPLY_MAGIC) {
-		snprintf(errstr, errstr_len, "Received package with incorrect reply_magic. Index of sent packages is %lld (0x%llX), received handle is %lld (0x%llX). Received magic 0x%lX, expected 0x%lX", (long long int)curhandle, (long long unsigned int)curhandle, (long long int)*((u64*)rep.handle), (long long unsigned int)*((u64*)rep.handle), (long unsigned int)rep.magic, (long unsigned int)NBD_REPLY_MAGIC);
+	if(rep.magic!=NBD_MAGIC_REPLY) {
+		snprintf(errstr, errstr_len, "Received package with incorrect reply_magic. Index of sent packages is %lld (0x%llX), received handle is %lld (0x%llX). Received magic 0x%lX, expected 0x%lX", (long long int)curhandle, (long long unsigned int)curhandle, (long long int)*((uint64_t*)rep.handle), (long long unsigned int)*((uint64_t*)rep.handle), (long unsigned int)rep.magic, (long unsigned int)NBD_MAGIC_REPLY);
 		retval=-1;
 		goto end;
 	}
 	if(rep.error) {
-		snprintf(errstr, errstr_len, "Received error from server: %ld (0x%lX). Handle is %lld (0x%llX).", (long int)rep.error, (long unsigned int)rep.error, (long long int)(*((u64*)rep.handle)), (long long unsigned int)*((u64*)rep.handle));
+		snprintf(errstr, errstr_len, "Received error from server: %ld (0x%lX). Handle is %lld (0x%llX).", (long int)rep.error, (long unsigned int)rep.error, (long long int)(*((uint64_t*)rep.handle)), (long long unsigned int)*((uint64_t*)rep.handle));
 		retval=-1;
 		goto end;
 	}
@@ -492,7 +496,7 @@ int oversize_test(gchar* hostname, int port, char* name, int sock,
 			goto err;
 		}
 	}
-	req.magic=htonl(NBD_REQUEST_MAGIC);
+	req.magic=htonl(NBD_MAGIC_REQUEST);
 	req.type=htonl(NBD_CMD_READ);
 	req.len=htonl(1024*1024);
 	memcpy(&(req.handle),&i,sizeof(i));
@@ -573,13 +577,13 @@ int throughput_test(gchar* hostname, int port, char* name, int sock,
 			goto err;
 		}
 	}
-	if ((testflags & TEST_FLUSH) && ((serverflags & (NBD_FLAG_SEND_FLUSH | NBD_FLAG_SEND_FUA))
-					 != (NBD_FLAG_SEND_FLUSH | NBD_FLAG_SEND_FUA))) {
+	if ((testflags & TEST_FLUSH) && ((serverflags & (NBD_EFLAG_SEND_FLUSH | NBD_EFLAG_SEND_FUA))
+					 != (NBD_EFLAG_SEND_FLUSH | NBD_EFLAG_SEND_FUA))) {
 		snprintf(errstr, errstr_len, "Server did not supply flush capability flags");
 		retval = -1;
 		goto err_open;
 	}
-	req.magic=htonl(NBD_REQUEST_MAGIC);
+	req.magic=htonl(NBD_MAGIC_REQUEST);
 	req.len=htonl(1024);
 	if(gettimeofday(&start, NULL)<0) {
 		retval=-1;
@@ -801,8 +805,8 @@ int integrity_test(gchar* hostname, int port, char* name, int sock,
 		}
 	}
 
-	if ((serverflags & (NBD_FLAG_SEND_FLUSH | NBD_FLAG_SEND_FUA))
-	    != (NBD_FLAG_SEND_FLUSH | NBD_FLAG_SEND_FUA))
+	if ((serverflags & (NBD_EFLAG_SEND_FLUSH | NBD_EFLAG_SEND_FUA))
+	    != (NBD_EFLAG_SEND_FLUSH | NBD_EFLAG_SEND_FUA))
 		g_warning("Server flags do not support FLUSH and FUA - these may error");
 
 #ifdef HAVE_MKSTEMP
@@ -910,7 +914,7 @@ int integrity_test(gchar* hostname, int port, char* name, int sock,
 					strerror(errno));
 			magic = ntohl(magic);
 			switch (magic) {
-			case NBD_REQUEST_MAGIC:
+			case NBD_MAGIC_REQUEST:
 				if (NULL == (prc = calloc(1, sizeof(struct reqcontext)))) {
 					retval=-1;
 					snprintf(errstr, errstr_len, "Could not allocate request");
@@ -922,7 +926,7 @@ int integrity_test(gchar* hostname, int port, char* name, int sock,
 						err_open,
 						"Could not read transaction log: %s",
 						strerror(errno));
-				prc->req.magic = htonl(NBD_REQUEST_MAGIC);
+				prc->req.magic = htonl(NBD_MAGIC_REQUEST);
 				memcpy(prc->orighandle, prc->req.handle, 8);
 				prc->seq=seq++;
 				if ((ntohl(prc->req.type) & NBD_CMD_MASK_COMMAND) == NBD_CMD_DISC) {
@@ -937,7 +941,7 @@ int integrity_test(gchar* hostname, int port, char* name, int sock,
 				}
 				prc = NULL;
 				break;
-			case NBD_REPLY_MAGIC:
+			case NBD_MAGIC_REPLY:
 				READ_ALL_ERRCHK(logfd,
 						sizeof(magic)+(char *)(&rep),
 						sizeof(struct nbd_reply)-sizeof(magic),
@@ -970,7 +974,7 @@ int integrity_test(gchar* hostname, int port, char* name, int sock,
 			/* If there is no buffered data, generate some */
 			if (!blocked && !(txbuf.head) && (NULL != (prc = txqueue.head)))
 			{
-				if (ntohl(prc->req.magic) != NBD_REQUEST_MAGIC) {
+				if (ntohl(prc->req.magic) != NBD_MAGIC_REQUEST) {
 					retval=-1;
 					g_warning("Asked to write a request without a magic number");
 					goto err_open;
@@ -1089,7 +1093,7 @@ int integrity_test(gchar* hostname, int port, char* name, int sock,
 					"Could not read from server socket: %s",
 					strerror(errno));
 			
-			if (rep.magic != htonl(NBD_REPLY_MAGIC)) {
+			if (rep.magic != htonl(NBD_MAGIC_REPLY)) {
 				retval=-1;
 				snprintf(errstr, errstr_len, "Bad magic from server");
 				goto err_open;
@@ -1115,7 +1119,7 @@ int integrity_test(gchar* hostname, int port, char* name, int sock,
 				goto err_open;
 			}
 
-			if (prc->req.magic != htonl(NBD_REQUEST_MAGIC)) {
+			if (prc->req.magic != htonl(NBD_MAGIC_REQUEST)) {
 				retval=-1;
 				snprintf(errstr, errstr_len, "Bad magic in inflight data: %08x", prc->req.magic);
 				goto err_open;
