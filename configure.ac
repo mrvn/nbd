@@ -4,6 +4,9 @@ dnl (c) 2003-2006 Wouter Verhelst <wouter@debian.org>
 AC_INIT([nbd],[3.3],[wouter@debian.org])
 AM_INIT_AUTOMAKE(foreign dist-bzip2)
 AM_MAINTAINER_MODE
+AM_PROG_LIBTOOL
+AC_SUBST(LIBTOOL_DEPS)
+AC_CONFIG_MACRO_DIR([m4])
 
 AC_ARG_ENABLE(
   lfs,
