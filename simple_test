@@ -1,0 +1,247 @@
+#!/bin/sh
+# Yes, that's POSIX sh, not bash!
+
+if [ -z "$TMPDIR" ]
+then
+	TMPDIR=/tmp
+fi
+tmpdir=`mktemp -d $TMPDIR/tmp.XXXXXX`
+conffile=${tmpdir}/nbd.conf
+pidfile=${tmpdir}/nbd.pid
+tmpnam=${tmpdir}/nbd.dd
+mydir=$(dirname "`readlink -f $0`")
+cleanup="$2"
+PID=""
+
+set -e
+
+trap cleanup EXIT
+
+cleanup() {
+	if [ -f ${pidfile} ]
+	then
+		kill `cat ${pidfile}`
+	else
+		if [ ! -z "$PID" ]
+		then
+			kill $PID
+		fi
+	fi
+	if [ -z "$cleanup" ]
+	then
+		rm -rf $tmpdir
+	fi
+}
+
+ulimit -c unlimited
+
+# Create a one-meg device
+dd if=/dev/zero of=$tmpnam bs=1024 count=4096 >/dev/null 2>&1
+
+echo $1
+
+case $1 in
+	*/cmd)
+		# Test with export specified on command line
+		./nbd-server -C /dev/null -p ${pidfile} 11111 $tmpnam &
+		# -p only works if nbd-server wasn't compiled with -DNOFORK or
+		# -DNODAEMON, which I sometimes do for testing and debugging.
+		PID=$!
+		sleep 1
+		./nbd-tester-client 127.0.0.1 11111
+		retval=$?
+	;;
+	*/cfgsize)
+		# Test oversized requests
+		./nbd-server -C /dev/null -p ${pidfile} 11112 $tmpnam &
+		# -p only works if nbd-server wasn't compiled with -DNOFORK or
+		# -DNODAEMON, which I sometimes do for testing and debugging.
+		PID=$!
+		sleep 1
+		./nbd-tester-client -o 127.0.0.1 11112
+		retval=$?
+	;;
+	*/cfg1)
+		# Test with export specified in config file
+		cat > ${conffile} <<EOF
+[generic]
+	oldstyle = true
+[export]
+	exportname = $tmpnam
+	port = 11113
+EOF
+		./nbd-server -C ${conffile} -p ${pidfile} &
+		PID=$!
+		sleep 1
+		./nbd-tester-client 127.0.0.1 11113
+		retval=$?
+	;;
+	*/cfgmulti)
+		# Test with multiple exports specified in config file, and
+		# testing more options too
+		cat >${conffile} <<EOF
+[generic]
+	oldstyle = true
+[export1]
+	exportname = $tmpnam
+	port = 11114
+	copyonwrite = true
+	listenaddr = 127.0.0.1
+[export2]
+	exportname = $tmpnam
+	port = 11115
+	readonly = true
+	listenaddr = 127.0.0.1
+EOF
+		./nbd-server -C ${conffile} -p ${pidfile} &
+		PID=$!
+		sleep 1
+		./nbd-tester-client localhost 11114
+		retval=$?
+		if [ $retval -ne 0 ]
+		then
+			if [ -f ${pidfile} ]
+			then
+				kill `cat ${pidfile}`
+			else
+				kill $PID
+			fi
+			if [ -z "$2" ]
+			then
+				rm -rf $tmpdir
+			fi
+			exit $retval
+		fi
+		./nbd-tester-client localhost 11115
+		retval=$?
+	;;
+	*/cfgnew)
+		# Test new-style exports
+		cat >${conffile} <<EOF
+[generic]
+[export1]
+	exportname = $tmpnam
+EOF
+		./nbd-server -C ${conffile} -p ${pidfile} &
+		PID=$!
+		sleep 1
+		./nbd-tester-client -N export1 localhost
+		retval=$?
+	;;
+	*/write)
+		# Test writing
+		cat >${conffile} <<EOF
+[generic]
+[export1]
+	exportname = $tmpnam
+EOF
+		./nbd-server -C ${conffile} -p ${pidfile} &
+		PID=$!
+		sleep 1
+		./nbd-tester-client -N export1 -w localhost
+		retval=$?
+	;;
+	*/flush)
+		# Test writes with flush
+		cat >${conffile} <<EOF
+[generic]
+[export1]
+	exportname = $tmpnam
+	flush = true
+	fua = true
+	rotational = true
+EOF
+		./nbd-server -C ${conffile} -p ${pidfile} &
+		PID=$!
+		sleep 1
+		./nbd-tester-client -N export1 -w -f localhost
+		retval=$?
+	;;
+	*/dirconfig)
+		# config.d-style configuration
+		cat >${conffile} <<EOF
+[generic]
+	includedir = $tmpdir/confdir
+EOF
+		mkdir $tmpdir/confdir
+		cat >$tmpdir/confdir/exp1.conf <<EOF
+[export1]
+	exportname = $tmpnam
+EOF
+		./nbd-server -C ${conffile} -p ${pidfile} &
+		PID=$!
+		sleep 1
+		./nbd-tester-client -N export1 localhost
+		retval=$?
+	;;
+	*/integrity)
+		# Integrity test
+		cat >${conffile} <<EOF
+[generic]
+[export1]
+	exportname = $tmpnam
+	flush = true
+	fua = true
+	rotational = true
+	filesize = 52428800
+	temporary = true
+EOF
+		./nbd-server -C ${conffile} -p ${pidfile} &
+		PID=$!
+		sleep 1
+		./nbd-tester-client -N export1 -i -t ${mydir}/integrity-test.tr localhost
+		retval=$?
+	;;
+	*/integrityhuge)
+		# Integrity test
+		cat >${conffile} <<EOF
+[generic]
+[export1]
+	exportname = $tmpnam
+	flush = true
+	fua = true
+	rotational = true
+	filesize = 52428800
+	temporary = true
+EOF
+		./nbd-server -C ${conffile} -p ${pidfile} &
+		PID=$!
+		sleep 1
+		./nbd-tester-client -N export1 -i -t ${mydir}/integrityhuge-test.tr localhost
+		retval=$?
+	;;
+	*/list)
+		# List exports
+		# This only works if we built nbd-client, which only exists on
+		# Linux. But hey, testing nbd-client itself isn't a bad idea,
+		# so here goes.
+		if [ `uname -s` != "Linux" ]
+		then
+			retval=77
+		else
+			cat >${conffile} <<EOF
+[generic]
+	listenaddr = 127.0.0.1
+	allowlist = true
+[export1]
+	exportname = $tmpnam
+	readonly = true
+EOF
+			./nbd-server -C ${conffile} -p ${pidfile} &
+			PID=$!
+			sleep 1
+			./nbd-client -l localhost
+			./nbd-tester-client -N export1 localhost
+			retval=$?
+		fi
+		;;
+	*)
+		echo "E: unknown test $1"
+		exit 1
+	;;
+esac
+
+if [ $retval -ne 0 ]
+then
+	exit $retval
+fi
