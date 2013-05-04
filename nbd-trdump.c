@@ -5,6 +5,8 @@
  * comprehensible
  */
 
+#include <nbd-server.h>
+
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -16,7 +18,6 @@
 /* We don't want to do syslog output in this program */
 #undef ISSERVER
 #include "cliserv.h"
-#include "nbd.h"
 
 static inline void doread(int f, void *buf, size_t len) {
         ssize_t res;
@@ -61,7 +62,7 @@ int main(int argc, char**argv) {
 		doread(readfd, &magic, sizeof(magic));
 		magic = ntohl(magic);
 		switch (magic) {
-		case NBD_REQUEST_MAGIC:
+		case NBD_MAGIC_REQUEST:
 			doread(readfd, sizeof(magic)+(char *)(&req), sizeof(struct nbd_request)-sizeof(magic));
 			handle = ntohll(*((long long int *)(req.handle)));
 			offset = ntohll(req.from);
@@ -94,7 +95,7 @@ int main(int argc, char**argv) {
 			       len);
 			
 			break;
-		case NBD_REPLY_MAGIC:
+		case NBD_MAGIC_REPLY:
 			doread(readfd, sizeof(magic)+(char *)(&rep), sizeof(struct nbd_reply)-sizeof(magic));
 			handle = ntohll(*((long long int *)(rep.handle)));
 			error = ntohl(rep.error);

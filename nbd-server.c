@@ -59,6 +59,9 @@
  * headers, so must come before those */
 #include "lfs.h"
 
+#include <stdint.h>
+#include <nbd-server.h>
+
 #include <assert.h>
 #include <sys/types.h>
 #include <sys/socket.h>
@@ -251,8 +254,8 @@ typedef struct {
 	int difffile;	     /**< filedescriptor of copyonwrite file. @todo
 			       shouldn't this be an array too? (cfr export) Or
 			       make -m and -c mutually exclusive */
-	u32 difffilelen;     /**< number of pages in difffile */
-	u32 *difmap;	     /**< see comment on the global difmap for this one */
+	uint32_t difffilelen;     /**< number of pages in difffile */
+	uint32_t *difmap;	     /**< see comment on the global difmap for this one */
 	gboolean modern;     /**< client was negotiated using modern negotiation protocol */
 	int transactionlogfd;/**< fd for transaction log */
 	int clientfeats;     /**< Features supported by this client */
@@ -1146,7 +1149,7 @@ static void sighup_handler(const int s G_GNUC_UNUSED) {
  **/
 off_t size_autodetect(int fhandle) {
 	off_t es;
-	u64 bytes __attribute__((unused));
+	uint64_t bytes __attribute__((unused));
 	struct stat stat_buf;
 	int error;
 
@@ -1405,7 +1408,7 @@ int expread(off_t a, char *buf, size_t len, CLIENT *client) {
 		offset=a-pagestart;
 		rdlen=(0<DIFFPAGESIZE-offset && len<(size_t)(DIFFPAGESIZE-offset)) ?
 			len : (size_t)DIFFPAGESIZE-offset;
-		if (client->difmap[mapcnt]!=(u32)(-1)) { /* the block is already there */
+		if (client->difmap[mapcnt]!=(uint32_t)(-1)) { /* the block is already there */
 			DEBUG("Page %llu is at %lu\n", (unsigned long long)mapcnt,
 			       (unsigned long)(client->difmap[mapcnt]));
 			myseek(client->difffile, client->difmap[mapcnt]*DIFFPAGESIZE+offset);
@@ -1451,7 +1454,7 @@ int expwrite(off_t a, char *buf, size_t len, CLIENT *client, int fua) {
 		wrlen=(0<DIFFPAGESIZE-offset && len<(size_t)(DIFFPAGESIZE-offset)) ?
 			len : (size_t)DIFFPAGESIZE-offset;
 
-		if (client->difmap[mapcnt]!=(u32)(-1)) { /* the block is already there */
+		if (client->difmap[mapcnt]!=(uint32_t)(-1)) { /* the block is already there */
 			DEBUG("Page %llu is at %lu\n", (unsigned long long)mapcnt,
 			       (unsigned long)(client->difmap[mapcnt])) ;
 			myseek(client->difffile,
@@ -1620,28 +1623,28 @@ static void handle_list(uint32_t opt, int net, GArray* servers, uint32_t cflags)
 CLIENT* negotiate(int net, CLIENT *client, GArray* servers, int phase) {
 	char zeros[128];
 	uint64_t size_host;
-	uint32_t flags = NBD_FLAG_HAS_FLAGS;
+	uint32_t flags = NBD_EFLAG_HAS_FLAGS;
 	uint16_t smallflags = 0;
 	uint64_t magic;
 
 	memset(zeros, '\0', sizeof(zeros));
 	assert(((phase & NEG_INIT) && (phase & NEG_MODERN)) || client);
 	if(phase & NEG_MODERN) {
-		smallflags |= NBD_FLAG_FIXED_NEWSTYLE;
+		smallflags |= NBD_GFLAG_FIXED_NEWSTYLE;
 	}
 	if(phase & NEG_INIT) {
 		/* common */
-		if (write(net, INIT_PASSWD, 8) < 0) {
+		if (write(net, NBD_INIT_PASSWD, 8) < 0) {
 			err_nonfatal("Negotiation failed/1: %m");
 			if(client)
 				exit(EXIT_FAILURE);
 		}
 		if(phase & NEG_MODERN) {
 			/* modern */
-			magic = htonll(opts_magic);
+			magic = htonll(NBD_MAGIC_OPTS);
 		} else {
 			/* oldstyle */
-			magic = htonll(cliserv_magic);
+			magic = htonll(NBD_MAGIC_CLISERV);
 		}
 		if (write(net, &magic, sizeof(magic)) < 0) {
 			err_nonfatal("Negotiation failed/2: %m");
@@ -1666,7 +1669,7 @@ CLIENT* negotiate(int net, CLIENT *client, GArray* servers, int phase) {
 			if (read(net, &magic, sizeof(magic)) < 0)
 				err_nonfatal("Negotiation failed/5: %m");
 			magic = ntohll(magic);
-			if(magic != opts_magic) {
+			if(magic != NBD_MAGIC_OPTS) {
 				err_nonfatal("Negotiation failed/5a: magic mismatch");
 				return NULL;
 			}
@@ -1697,19 +1700,19 @@ CLIENT* negotiate(int net, CLIENT *client, GArray* servers, int phase) {
 		}
 	}
 	/* common */
-	size_host = htonll((u64)(client->exportsize));
+	size_host = htonll((uint64_t)(client->exportsize));
 	if (write(net, &size_host, 8) < 0)
 		err("Negotiation failed/9: %m");
 	if (client->server->flags & F_READONLY)
-		flags |= NBD_FLAG_READ_ONLY;
+		flags |= NBD_EFLAG_READ_ONLY;
 	if (client->server->flags & F_FLUSH)
-		flags |= NBD_FLAG_SEND_FLUSH;
+		flags |= NBD_EFLAG_SEND_FLUSH;
 	if (client->server->flags & F_FUA)
-		flags |= NBD_FLAG_SEND_FUA;
+		flags |= NBD_EFLAG_SEND_FUA;
 	if (client->server->flags & F_ROTATIONAL)
-		flags |= NBD_FLAG_ROTATIONAL;
+		flags |= NBD_EFLAG_ROTATIONAL;
 	if (client->server->flags & F_TRIM)
-		flags |= NBD_FLAG_SEND_TRIM;
+		flags |= NBD_EFLAG_SEND_TRIM;
 	if (phase & NEG_OLD) {
 		/* oldstyle */
 		flags = htonl(flags);
@@ -1753,7 +1756,7 @@ int mainloop(CLIENT *client) {
 #endif
 	negotiate(client->net, client, NULL, client->modern ? NEG_MODERN : (NEG_OLD | NEG_INIT));
 	DEBUG("Entering request loop!\n");
-	reply.magic = htonl(NBD_REPLY_MAGIC);
+	reply.magic = htonl(NBD_MAGIC_REPLY);
 	reply.error = 0;
 	while (go_on) {
 		char buf[BUFSIZE];
@@ -1779,7 +1782,7 @@ int mainloop(CLIENT *client) {
 				(unsigned long long)request.from,
 				(unsigned long long)request.from / 512, len);
 
-		if (request.magic != htonl(NBD_REQUEST_MAGIC))
+		if (request.magic != htonl(NBD_MAGIC_REQUEST))
 			err("Not enough magic.");
 
 		memcpy(reply.handle, request.handle, sizeof(reply.handle));
@@ -2019,9 +2022,9 @@ int copyonwrite_prepare(CLIENT* client) {
 	msg(LOG_INFO, "About to create map and diff file %s", client->difffilename) ;
 	client->difffile=open(client->difffilename,O_RDWR | O_CREAT | O_TRUNC,0600) ;
 	if (client->difffile<0) err("Could not create diff file (%m)") ;
-	if ((client->difmap=calloc(client->exportsize/DIFFPAGESIZE,sizeof(u32)))==NULL)
+	if ((client->difmap=calloc(client->exportsize/DIFFPAGESIZE,sizeof(uint32_t)))==NULL)
 		err("Could not allocate memory") ;
-	for (i=0;i<client->exportsize/DIFFPAGESIZE;i++) client->difmap[i]=(u32)-1 ;
+	for (i=0;i<client->exportsize/DIFFPAGESIZE;i++) client->difmap[i]=(uint32_t)-1 ;
 
 	return 0;
 }

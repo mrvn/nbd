@@ -21,6 +21,9 @@
 #include "config.h"
 #include "lfs.h"
 
+#include <stdint.h>
+#include <nbd-client.h>
+
 #include <sys/ioctl.h>
 #include <sys/socket.h>
 #include <sys/types.h>
@@ -138,7 +141,7 @@ void ask_list(int sock) {
 	uint64_t magic;
 	char buf[1024];
 
-	magic = ntohll(opts_magic);
+	magic = ntohll(NBD_MAGIC_OPTS);
 	if (write(sock, &magic, sizeof(magic)) < 0)
 		err("Failed/2.2: %m");
 
@@ -171,7 +174,7 @@ void ask_list(int sock) {
 		magic=ntohll(magic);
 		len=ntohl(len);
 		reptype=ntohl(reptype);
-		if(magic != rep_magic) {
+		if(magic != NBD_MAGIC_REP) {
 			err("Not enough magic from server");
 		}
 		if(reptype & NBD_REP_FLAG_ERROR) {
@@ -210,7 +213,7 @@ void ask_list(int sock) {
 	} while(reptype != NBD_REP_ACK);
 	opt=htonl(NBD_OPT_ABORT);
 	len=htonl(0);
-	magic=htonll(opts_magic);
+	magic=htonll(NBD_MAGIC_OPTS);
 	if (write(sock, &magic, sizeof(magic)) < 0)
 		err("Failed/2.2: %m");
 	if (write(sock, &opt, sizeof(opt)) < 0)
@@ -219,8 +222,8 @@ void ask_list(int sock) {
 		err("Failed writing length");
 }
 
-void negotiate(int sock, u64 *rsize64, u32 *flags, char* name, uint32_t needed_flags, uint32_t client_flags, uint32_t do_opts) {
-	u64 magic, size64;
+void negotiate(int sock, uint64_t *rsize64, uint32_t *flags, char* name, uint32_t needed_flags, uint32_t client_flags, uint32_t do_opts) {
+	uint64_t magic, size64;
 	uint16_t tmp;
 	char buf[256] = "\0\0\0\0\0\0\0\0\0";
 
@@ -229,7 +232,7 @@ void negotiate(int sock, u64 *rsize64, u32 *flags, char* name, uint32_t needed_f
 		err("Failed/1: %m");
 	if (strlen(buf)==0)
 		err("Server closed connection");
-	if (strcmp(buf, INIT_PASSWD))
+	if (strcmp(buf, NBD_INIT_PASSWD))
 		err("INIT_PASSWD bad");
 	printf(".");
 	if (read(sock, &magic, sizeof(magic)) < 0)
@@ -239,8 +242,8 @@ void negotiate(int sock, u64 *rsize64, u32 *flags, char* name, uint32_t needed_f
 		uint32_t opt;
 		uint32_t namesize;
 
-		if (magic != opts_magic) {
-			if(magic == cliserv_magic) {
+		if (magic != NBD_MAGIC_OPTS) {
+			if(magic == NBD_MAGIC_CLISERV) {
 				err("It looks like you're trying to connect to an oldstyle server with a named export. This won't work.");
 			}
 		}
@@ -248,7 +251,7 @@ void negotiate(int sock, u64 *rsize64, u32 *flags, char* name, uint32_t needed_f
 		if(read(sock, &tmp, sizeof(uint16_t)) < 0) {
 			err("Failed reading flags: %m");
 		}
-		*flags = ((u32)ntohs(tmp));
+		*flags = ((uint32_t)ntohs(tmp));
 		if((needed_flags & *flags) != needed_flags) {
 			/* There's currently really only one reason why this
 			 * check could possibly fail, but we may need to change
@@ -267,22 +270,22 @@ void negotiate(int sock, u64 *rsize64, u32 *flags, char* name, uint32_t needed_f
 		}
 
 		/* Write the export name that we're after */
-		magic = htonll(opts_magic);
+		magic = htonll(NBD_MAGIC_OPTS);
 		if (write(sock, &magic, sizeof(magic)) < 0)
 			err("Failed/2.2: %m");
 
 		opt = ntohl(NBD_OPT_EXPORT_NAME);
 		if (write(sock, &opt, sizeof(opt)) < 0)
 			err("Failed/2.3: %m");
-		namesize = (u32)strlen(name);
+		namesize = (uint32_t)strlen(name);
 		namesize = ntohl(namesize);
 		if (write(sock, &namesize, sizeof(namesize)) < 0)
 			err("Failed/2.4: %m");
 		if (write(sock, name, strlen(name)) < 0)
 			err("Failed/2.4: %m");
 	} else {
-		if (magic != cliserv_magic) {
-			if(magic != opts_magic)
+		if (magic != NBD_MAGIC_CLISERV) {
+			if(magic != NBD_MAGIC_OPTS)
 				err("Not enough cliserv_magic");
 			else
 				err("It looks like you're trying to connect to a newstyle server with the oldstyle protocol. Try the -N option.");
@@ -320,9 +323,9 @@ void negotiate(int sock, u64 *rsize64, u32 *flags, char* name, uint32_t needed_f
 	*rsize64 = size64;
 }
 
-void setsizes(int nbd, u64 size64, int blocksize, u32 flags) {
+void setsizes(int nbd, uint64_t size64, int blocksize, uint32_t flags) {
 	unsigned long size;
-	int read_only = (flags & NBD_FLAG_READ_ONLY) ? 1 : 0;
+	int read_only = (flags & NBD_EFLAG_READ_ONLY) ? 1 : 0;
 
 	if (size64>>12 > (uint64_t)~0UL)
 		err("Device too large.\n");
@@ -429,8 +432,8 @@ int main(int argc, char *argv[]) {
 	int timeout=0;
 	int sdp=0;
 	int G_GNUC_UNUSED nofork=0; // if -dNOFORK
-	u64 size64;
-	u32 flags;
+	uint64_t size64;
+	uint32_t flags;
 	int c;
 	int nonspecial=0;
 	char* name=NULL;
@@ -511,8 +514,8 @@ int main(int argc, char *argv[]) {
 			usage(NULL);
 			exit(EXIT_SUCCESS);
 		case 'l':
-			needed_flags |= NBD_FLAG_FIXED_NEWSTYLE;
-			cflags |= NBD_FLAG_C_FIXED_NEWSTYLE;
+			needed_flags |= NBD_GFLAG_FIXED_NEWSTYLE;
+			cflags |= NBD_CFLAG_FIXED_NEWSTYLE;
 			opts |= NBDC_DO_LIST;
 			name="";
 			nbddev="";
@@ -618,8 +621,8 @@ int main(int argc, char *argv[]) {
 				cont=0;
 			} else {
 				if(cont) {
-					u64 new_size;
-					u32 new_flags;
+					uint64_t new_size;
+					uint32_t new_flags;
 
 					close(sock); close(nbd);
 					for (;;) {
