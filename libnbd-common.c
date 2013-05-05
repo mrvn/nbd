@@ -57,3 +57,32 @@ uint64_t ntohll(uint64_t a) {
 uint64_t htonll(uint64_t a) {
     return ntohll(a);
 }
+
+const char * err_msgs[] = {
+    "success",				/* NBD_SUCCESS */
+    "magic did not match",		/* NBD_EMAGIC */
+    "data larger than buffer",		/* NBD_ETOOBIG */
+    "could not read magic",		/* NBD_EREAD_MAGIC */
+    "could not read option cmd",	/* NBD_EREAD_CMD */
+    "could not read length",		/* NBD_EREAD_LEN */
+    "could not read data",		/* NBD_EREAD_DATA */
+    "could not read option result",	/* NBD_EREAD_RES */
+    "could not write magic",		/* NBD_EWRITE_MAGIC */
+    "could not write option cmd",	/* NBD_EWRITE_CMD */
+    "could not write length",		/* NBD_EWRITE_LEN */
+    "could not write data",		/* NBD_EWRITE_DATA */
+    "could not write option result",	/* NBD_EWRITE_RES */
+};
+
+/*
+ * Return string describing error number
+ *
+ * @param errnum  error number
+ * @return string describing error number
+ */
+const char *nbd_strerror(nbd_err_t errnum) {
+    if (errnum >= sizeof(err_msgs) / sizeof(err_msgs[0])) {
+	return "Unknown error";
+    }
+    return err_msgs[errnum];
+}

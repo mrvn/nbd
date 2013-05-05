@@ -39,6 +39,34 @@
 #include <stdint.h>
 
 /*
+ * ERRORS
+ */
+
+typedef enum nbd_err {
+	NBD_SUCCESS      =  0,
+	NBD_EMAGIC       =  1,	// magic did not match
+	NBD_ETOOBIG      =  2,	// data larger than buffer
+	NBD_EREAD_MAGIC  =  3,	// could not read magic
+	NBD_EREAD_CMD    =  4,	// could not read option cmd
+	NBD_EREAD_LEN    =  5,	// could not read length
+	NBD_EREAD_DATA   =  6,	// could not read data
+	NBD_EREAD_RES    =  7,	// could not read option result
+	NBD_EWRITE_MAGIC =  8,	// could not write magic
+	NBD_EWRITE_CMD   =  9,	// could not write option cmd
+	NBD_EWRITE_LEN   = 10,	// could not write length
+	NBD_EWRITE_DATA  = 11,	// could not write data
+	NBD_EWRITE_RES   = 12,	// could not write option result
+} nbd_err_t;
+
+/*
+ * Return string describing error number
+ *
+ * @param errnum  error number
+ * @return string describing error number
+ */
+const char *nbd_strerror(nbd_err_t errnum);
+
+/*
  * NEGOTIATION
  */
 
@@ -63,8 +91,19 @@ typedef enum nbd_opt_cmd {
 	NBD_OPT_DO_NOT_USE_ = 1 << 31,	// force enum to be 32bit, DO NOT USE
 } nbd_opt_cmd_t;
 
+/*
+ * This is the packet used for requesting options from the server.
+ * Warning: Byte order of entries depend on creating function.
+ */
+typedef struct nbd_opt_request {
+	uint64_t      magic;
+	nbd_opt_cmd_t cmd;
+	uint32_t      len;
+	const void   *data;
+} __attribute__ ((packed)) nbd_opt_request_t;
+
 // Replies the server can send during negotiation
-enum {
+typedef enum nbd_opt_res {
 	NBD_REP_ACK        = 1,		/* ACK a request. Data: option number
 				         * to be acked
 				         */
@@ -93,8 +132,22 @@ enum {
 	NBD_REP_ERR_PLATFORM = 4 | NBD_REP_FLAG_ERROR, /* Option not supported
 							* on this platform
 							*/
+} nbd_opt_res_t;
+
+/*
+ * This is the packet used for replying to option requests by the server.
+ * Warning: Byte order of entries depend on creating function.
+ */
+typedef struct nbd_opt_reply {
+	uint64_t      magic;
+	nbd_opt_cmd_t cmd;	// from nbd_opt_request_t
+	nbd_opt_res_t result;
+	uint32_t      len;
+	const void   *data;
+} __attribute__ ((packed)) nbd_opt_reply_t;
 
 // Global flags
+enum {
 	NBD_GFLAG_FIXED_NEWSTYLE = 1 << 0,	/* new-style export that
 						 * actually supports extending
 						 */
@@ -118,17 +171,6 @@ enum {
 	NBD_EFLAG_ROTATIONAL = 1 << NBD_EBIT_ROTATIONAL,
 	NBD_EFLAG_SEND_TRIM  = 1 << NBD_EBIT_SEND_TRIM,
 };
-
-/*
- * This is the packet used for requesting options from the server.
- * All data is stored in network byte order. Access through helpers only.
- */
-typedef struct nbd_option {
-	uint64_t      magic;
-	nbd_opt_cmd_t cmd;
-	uint32_t      len;
-	const void   *data;
-} __attribute__ ((packed)) nbd_option_t;
 
 /*
  * REQUESTS AND REPLIES

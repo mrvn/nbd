@@ -134,45 +134,35 @@ int opennet(char *name, char* portstr, int sdp) {
 }
 
 void ask_list(int sock) {
-	uint32_t opt;
-	uint32_t opt_server;
-	uint32_t len;
-	uint32_t reptype;
-	uint64_t magic;
 	const int BUF_SIZE = 1024;
+	nbd_opt_request_t request;
+	nbd_opt_reply_t reply;
 	char buf[BUF_SIZE];
-	nbd_option_t req;
+	int res;
+	uint32_t name_len;
+	uint32_t descr_off;
+	uint32_t descr_len;
+	char *name;
+	char *descr;
 
-	nbd_option_init_list(&req);
+	nbd_opt_request_init_list(&request);
 
-	if (nbd_sync_write_option(sock, &req) < 0) {
+	if ((res = nbd_sync_write_opt_request(sock, &request)) != 0) {
+		fprintf(stderr, "Error: %s\n", nbd_strerror(res));
 		err("Writing list option failed: %m");
 	}
 	
 	/* newline, move away from the "Negotiation:" line */
 	printf("\n");
 	do {
-		memset(buf, 0, 1024);
-		if(read(sock, &magic, sizeof(magic)) < 0) {
-			err("Reading magic from server: %m");
+		res = nbd_sync_read_opt_reply(sock, &reply, buf, BUF_SIZE - 1);
+		if (res != 0) {
+			fprintf(stderr, "Error: %s\n", nbd_strerror(res));
+			err("Reading option reply from server: %m");
 		}
-		if(read(sock, &opt_server, sizeof(opt_server)) < 0) {
-			err("Reading option: %m");
-		}
-		if(read(sock, &reptype, sizeof(reptype)) <0) {
-			err("Reading reply from server: %m");
-		}
-		if(read(sock, &len, sizeof(len)) < 0) {
-			err("Reading length from server: %m");
-		}
-		magic=ntohll(magic);
-		len=ntohl(len);
-		reptype=ntohl(reptype);
-		if(magic != NBD_MAGIC_REP) {
-			err("Not enough magic from server");
-		}
-		if(reptype & NBD_REP_FLAG_ERROR) {
-			switch(reptype) {
+		// ensure terminating 0 byte in reply string
+		if (reply.result & NBD_REP_FLAG_ERROR) {
+			switch(reply.result) {
 				case NBD_REP_ERR_POLICY:
 					fprintf(stderr, "\nE: listing not allowed by server.\n");
 					break;
@@ -180,45 +170,40 @@ void ask_list(int sock) {
 					fprintf(stderr, "\nE: unexpected error from server.\n");
 					break;
 			}
-			if(len) {
-				if(read(sock, buf, len) < 0) {
-					fprintf(stderr, "\nE: could not read error message from server\n");
-				}
+			if (reply.len > 0) {
 				fprintf(stderr, "Server said: %s\n", buf);
 			}
 			exit(EXIT_FAILURE);
 		} else {
-			if(len) {
-				if(reptype != NBD_REP_SERVER) {
+			if (reply.len > 0) {
+				if(reply.result != NBD_REP_SERVER) {
 					err("Server sent us a reply we don't understand!");
 				}
-				if(read(sock, &len, sizeof(len)) < 0) {
-					fprintf(stderr, "\nE: could not read export name length from server\n");
-					exit(EXIT_FAILURE);
+				if (reply.len < 4) {
+					err("Server reply too short!");
 				}
-				len=ntohl(len);
-				if (len >= BUF_SIZE) {
-					fprintf(stderr, "\nE: export name on server too long\n");
-					exit(EXIT_FAILURE);
+				memcpy(&name_len, buf, sizeof(name_len));
+				name_len = ntohl(name_len);
+				if (reply.len < name_len + 4) {
+					err("Server reply shorter than expected!");
 				}
-				if(read(sock, buf, len) < 0) {
-					fprintf(stderr, "\nE: could not read export name from server\n");
-					exit(EXIT_FAILURE);
+				name = strndupa(&buf[4], name_len);
+				descr_off = 4 + name_len;
+				descr_len = reply.len - descr_off;
+				if (descr_len > 0) {
+					descr = strndupa(&buf[descr_off], descr_len);
+					printf("%s: %s\n", name, descr);
+				} else {
+					printf("%s\n", name);
 				}
-				buf[len] = 0;
-				printf("%s\n", buf);
 			}
 		}
-	} while(reptype != NBD_REP_ACK);
-	opt=htonl(NBD_OPT_ABORT);
-	len=htonl(0);
-	magic=htonll(NBD_MAGIC_OPTS);
-	if (write(sock, &magic, sizeof(magic)) < 0)
-		err("Failed/2.2: %m");
-	if (write(sock, &opt, sizeof(opt)) < 0)
-		err("Failed writing abort");
-	if (write(sock, &len, sizeof(len)) < 0)
-		err("Failed writing length");
+	} while(reply.result != NBD_REP_ACK);
+
+	nbd_opt_request_init_abort(&request);
+	if (nbd_sync_write_opt_request(sock, &request) < 0) {
+		err("Writing abort option failed: %m");
+	}
 }
 
 void negotiate(int sock, uint64_t *rsize64, uint32_t *flags, char* name, uint32_t needed_flags, uint32_t client_flags, uint32_t do_opts) {

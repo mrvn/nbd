@@ -36,6 +36,7 @@
 #ifndef LINUX_NBD_CLIENT_H
 #define LINUX_NBD_CLIENT_H
 
+#include <stddef.h>
 #include <sys/ioctl.h>
 
 #include <nbd-common.h>
@@ -56,47 +57,60 @@
  * Initialize a nbd_option_t. Arguments are converted to network byte order
  * except for the data part.
  *
- * @param  opt   option request
+ * @param  req   option request
  * @param  cmd   option type
  * @param  len   length of data
  * @param  data  pointer to <len> bytes of data (or NULL if len == 0)
- * @return       opt will be initialized in network byte order
+ * @return       req will be initialized in network byte order
  */
-void nbd_option_init(nbd_option_t *opt, nbd_opt_cmd_t cmd, uint32_t len,
+void nbd_opt_request_init(nbd_opt_request_t *req, nbd_opt_cmd_t cmd, uint32_t len,
 		     const void *data);
 
 /*
- * Initialize a nbd_option_t to select an export name.
+ * Initialize a nbd_opt_request_t to select an export name.
  *
- * @param  opt   option request
+ * @param  req   option request
  * @param  name  name of export
- * @return       opt will be initialized in network byte order
+ * @return       req will be initialized in network byte order
  */
-void nbd_option_init_export_name(nbd_option_t *opt, const char *name);
+void nbd_opt_request_init_export_name(nbd_opt_request_t *req, const char *name);
 
 /*
- * Initialize a nbd_option_t to abort.
+ * Initialize a nbd_opt_request_t to abort.
  *
- * @param  opt   option request
- * @return       opt will be initialized in network byte order
+ * @param  req   option request
+ * @return       req will be initialized in network byte order
  */
-void nbd_option_init_abort(nbd_option_t *opt);
+void nbd_opt_request_init_abort(nbd_opt_request_t *req);
 
 /*
- * Initialize a nbd_option_t to list exports.
+ * Initialize a nbd_opt_request_t to list exports.
  *
- * @param  opt   option request
- * @return       opt will be initialized in network byte order
+ * @param  req   option request
+ * @return       req will be initialized in network byte order
  */
-void nbd_option_init_list(nbd_option_t *opt);
+void nbd_opt_request_init_list(nbd_opt_request_t *req);
 
 /*
  * Write option request to file descriptor.
  *
  * @param fd   file descriptor to write to
- * @param opt  option request to write
+ * @param req  option request to write
  * @return 0 - success, -1 - error
  */
-int nbd_sync_write_option(int fd, const nbd_option_t *opt);
+int nbd_sync_write_opt_request(int fd, const nbd_opt_request_t *req);
+
+/*
+ * Read option reply from file descriptor.
+ *
+ * @param fd   file descriptor to read from
+ * @param res  option reply to fill
+ * @param buf  buffer for extra data for reply
+ * @param len  length of buf
+ * @return 0 on success, error number otherwise,
+ *         res will be filled in host byte order
+ */
+int nbd_sync_read_opt_reply(int fd, nbd_opt_reply_t *res, void *buf,
+			    size_t len);
 
 #endif // #ifndef LINUX_NBD_CLIENT_H

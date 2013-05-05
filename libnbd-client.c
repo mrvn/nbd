@@ -41,75 +41,122 @@
  */
 
 /*
- * Initialize a nbd_option_t. Arguments are converted to network byte order
+ * Initialize a nbd_opt_request_t. Arguments are converted to network byte order
  * except for the data part.
  *
- * @param  opt   option request
+ * @param  req   option request
  * @param  cmd   option type
  * @param  len   length of data
  * @param  data  pointer to <len> bytes of data (or NULL if len == 0)
- * @return       opt will be initialized in network byte order
+ * @return       req will be initialized in network byte order
  */
-void nbd_option_init(nbd_option_t *opt, nbd_opt_cmd_t cmd, uint32_t len,
+void nbd_opt_request_init(nbd_opt_request_t *req, nbd_opt_cmd_t cmd, uint32_t len,
 		     const void *data) {
-	opt->magic = htonll(NBD_MAGIC_OPTS);
-	opt->cmd   = htonl(cmd);
-	opt->len   = htonl(len);
-	opt->data  = data;
+	req->magic = htonll(NBD_MAGIC_OPTS);
+	req->cmd   = htonl(cmd);
+	req->len   = htonl(len);
+	req->data  = data;
 }
 
 /*
- * Initialize a nbd_option_t to select an export name.
+ * Initialize a nbd_opt_request_t to select an export name.
  *
- * @param  opt   option request
+ * @param  req   option request
  * @param  name  name of export
- * @return       opt will be initialized in network byte order
+ * @return       req will be initialized in network byte order
  */
-void nbd_option_init_export_name(nbd_option_t *opt, const char *name) {
-	nbd_option_init(opt, NBD_OPT_EXPORT_NAME, strlen(name), name);
+void nbd_opt_request_init_export_name(nbd_opt_request_t *req, const char *name) {
+	nbd_opt_request_init(req, NBD_OPT_EXPORT_NAME, strlen(name), name);
 }
 
 /*
- * Initialize a nbd_option_t to abort.
+ * Initialize a nbd_opt_request_t to abort.
  *
- * @param  opt   option request
+ * @param  req   option request
  * @return       opt will be initialized in network byte order
  */
-void nbd_option_init_abort(nbd_option_t *opt) {
-	nbd_option_init(opt, NBD_OPT_ABORT, 0, NULL);
+void nbd_opt_request_init_abort(nbd_opt_request_t *req) {
+	nbd_opt_request_init(req, NBD_OPT_ABORT, 0, NULL);
 }
 
 /*
- * Initialize a nbd_option_t to list exports.
+ * Initialize a nbd_opt_request_t to list exports.
  *
- * @param  opt   option request
+ * @param  req   option request
  * @return       opt will be initialized in network byte order
  */
-void nbd_option_init_list(nbd_option_t *opt) {
-	nbd_option_init(opt, NBD_OPT_LIST, 0, NULL);
+void nbd_opt_request_init_list(nbd_opt_request_t *req) {
+	nbd_opt_request_init(req, NBD_OPT_LIST, 0, NULL);
 }
 
 /*
  * Write option request to file descriptor.
  *
  * @param fd   file descriptor to write to
- * @param opt  option request to write
+ * @param req  option request to write
  * @return 0 - success, -1 - error
  */
-int nbd_sync_write_option(int fd, const nbd_option_t *opt) {
+int nbd_sync_write_opt_request(int fd, const nbd_opt_request_t *req) {
 	// FIXME: use mywrite()
-	if (write(fd, &opt->magic, sizeof(opt->magic)) < 0) {
-		return -1;
+	if (write(fd, &req->magic, sizeof(req->magic)) < 0) {
+		return NBD_EWRITE_MAGIC;
 	}
-	if (write(fd, &opt->cmd, sizeof(opt->cmd)) < 0) {
-		return -1;
+	if (write(fd, &req->cmd, sizeof(req->cmd)) < 0) {
+		return NBD_EWRITE_CMD;
 	}
-	if (write(fd, &opt->len, sizeof(opt->len)) < 0) {
-		return -1;
+	if (write(fd, &req->len, sizeof(req->len)) < 0) {
+		return NBD_EWRITE_LEN;
 	}
-	if (opt->len > 0) {
-		if (write(fd, opt->data, opt->len) < 0) {
-			return -1;
+	if (req->len > 0) {
+		if (write(fd, req->data, req->len) < 0) {
+			return NBD_EWRITE_DATA;
 		}
 	}
+	return 0;
+}
+
+/*
+ * Read option reply from file descriptor.
+ *
+ * @param fd   file descriptor to read from
+ * @param res  option reply to fill
+ * @param buf  buffer for extra data for reply
+ * @param len  length of buf
+ * @return 0 on success, error number otherwise,
+ *         res will be filled in host byte order
+ */
+int nbd_sync_read_opt_reply(int fd, nbd_opt_reply_t *res, void *buf,
+			    size_t len) {
+	// FIXME: use myread()
+	if(read(fd, &res->magic, sizeof(res->magic)) < 0) {
+		return NBD_EREAD_MAGIC; // err("Reading magic from server: %m");
+	}
+	res->magic = ntohll(res->magic);
+	if (res->magic != NBD_MAGIC_REP) {
+		return NBD_EMAGIC; // err("Not enough magic from server");
+	}
+	if(read(fd, &res->cmd, sizeof(res->cmd)) < 0) {
+		return NBD_EREAD_CMD; // err("Reading option: %m");
+	}
+	res->cmd = ntohl(res->cmd);
+	if(read(fd, &res->result, sizeof(res->result)) <0) {
+		return NBD_EREAD_RES; // err("Reading reply from server: %m");
+	}
+	res->result = ntohl(res->result);
+	if(read(fd, &res->len, sizeof(res->len)) < 0) {
+		return NBD_EREAD_LEN; // err("Reading length from server: %m");
+	}
+	res->len = ntohl(res->len);
+	if (res->len > len) {
+		return NBD_ETOOBIG; // too much data for buffer
+	}
+	if (res->len > 0) {
+		res->data = buf;
+		if(read(fd, buf, res->len) < 0) {
+			return NBD_EREAD_DATA; // err("Reading data from server: %m");
+		}
+	} else {
+		res->data = NULL;
+	}
+	return 0;
 }
