@@ -101,21 +101,6 @@ void logging(void) {
 	setvbuf(stderr, NULL, _IONBF, 0);
 }
 
-#ifdef WORDS_BIGENDIAN
-uint64_t ntohll(uint64_t a) {
-	return a;
-}
-#else
-uint64_t ntohll(uint64_t a) {
-	uint32_t lo = a & 0xffffffff;
-	uint32_t hi = a >> 32U;
-	lo = ntohl(lo);
-	hi = ntohl(hi);
-	return ((uint64_t) lo) << 32U | hi;
-}
-#endif
-#define htonll ntohll
-
 #define NBD_DEFAULT_PORT	"10809"	/* Port on which named exports are
 					 * served */
 

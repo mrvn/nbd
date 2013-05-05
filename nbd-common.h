@@ -159,4 +159,13 @@ typedef struct nbd_reply {
 	char     handle[8];	// handle you got from request
 } __attribute__ ((packed)) nbd_reply_t;
 
+/*
+ * Convert between host and network byte order.
+ *
+ * @param a  64bit integer to convert
+ * @retrurn converted 64bit integer
+ */
+uint64_t ntohll(uint64_t a);
+uint64_t htonll(uint64_t a);
+
 #endif // #ifndef LINUX_NBD_COMMON_H
