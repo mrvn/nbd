@@ -52,4 +52,51 @@
 #define NBD_SET_TIMEOUT 	_IO( 0xab, 9 )
 #define NBD_SET_FLAGS 		_IO( 0xab, 10 )
 
+/*
+ * Initialize a nbd_option_t. Arguments are converted to network byte order
+ * except for the data part.
+ *
+ * @param  opt   option request
+ * @param  cmd   option type
+ * @param  len   length of data
+ * @param  data  pointer to <len> bytes of data (or NULL if len == 0)
+ * @return       opt will be initialized in network byte order
+ */
+void nbd_option_init(nbd_option_t *opt, nbd_opt_cmd_t cmd, uint32_t len,
+		     const void *data);
+
+/*
+ * Initialize a nbd_option_t to select an export name.
+ *
+ * @param  opt   option request
+ * @param  name  name of export
+ * @return       opt will be initialized in network byte order
+ */
+void nbd_option_init_export_name(nbd_option_t *opt, const char *name);
+
+/*
+ * Initialize a nbd_option_t to abort.
+ *
+ * @param  opt   option request
+ * @return       opt will be initialized in network byte order
+ */
+void nbd_option_init_abort(nbd_option_t *opt);
+
+/*
+ * Initialize a nbd_option_t to list exports.
+ *
+ * @param  opt   option request
+ * @return       opt will be initialized in network byte order
+ */
+void nbd_option_init_list(nbd_option_t *opt);
+
+/*
+ * Write option request to file descriptor.
+ *
+ * @param fd   file descriptor to write to
+ * @param opt  option request to write
+ * @return 0 - success, -1 - error
+ */
+int nbd_sync_write_option(int fd, const nbd_option_t *opt);
+
 #endif // #ifndef LINUX_NBD_CLIENT_H

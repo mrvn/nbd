@@ -51,7 +51,7 @@ enum {
 };
 
 // Options that the client can select to the server
-enum {
+typedef enum nbd_opt_cmd {
 	NBD_OPT_EXPORT_NAME = 1,	/* Client wants to select a named
 					 * export, is followed by name of
 					 * export
@@ -60,8 +60,11 @@ enum {
 	NBD_OPT_LIST        = 3,	/* Client request list of supported
 					 * exports, not followed by data
 					 */
+	NBD_OPT_DO_NOT_USE_ = 1 << 31,	// force enum to be 32bit, DO NOT USE
+} nbd_opt_cmd_t;
 
 // Replies the server can send during negotiation
+enum {
 	NBD_REP_ACK        = 1,		/* ACK a request. Data: option number
 				         * to be acked
 				         */
@@ -115,6 +118,17 @@ enum {
 	NBD_EFLAG_ROTATIONAL = 1 << NBD_EBIT_ROTATIONAL,
 	NBD_EFLAG_SEND_TRIM  = 1 << NBD_EBIT_SEND_TRIM,
 };
+
+/*
+ * This is the packet used for requesting options from the server.
+ * All data is stored in network byte order. Access through helpers only.
+ */
+typedef struct nbd_option {
+	uint64_t      magic;
+	nbd_opt_cmd_t cmd;
+	uint32_t      len;
+	const void   *data;
+} __attribute__ ((packed)) nbd_option_t;
 
 /*
  * REQUESTS AND REPLIES

@@ -141,21 +141,14 @@ void ask_list(int sock) {
 	uint64_t magic;
 	const int BUF_SIZE = 1024;
 	char buf[BUF_SIZE];
+	nbd_option_t req;
 
-	magic = ntohll(NBD_MAGIC_OPTS);
-	if (write(sock, &magic, sizeof(magic)) < 0)
-		err("Failed/2.2: %m");
+	nbd_option_init_list(&req);
 
-	/* Ask for the list */
-	opt = htonl(NBD_OPT_LIST);
-	if(write(sock, &opt, sizeof(opt)) < 0) {
-		err("writing list option failed: %m");
+	if (nbd_sync_write_option(sock, &req) < 0) {
+		err("Writing list option failed: %m");
 	}
-	/* Send the length (zero) */
-	len = htonl(0);
-	if(write(sock, &len, sizeof(len)) < 0) {
-		err("writing length failed: %m");
-	}
+	
 	/* newline, move away from the "Negotiation:" line */
 	printf("\n");
 	do {
